@@ -1,0 +1,104 @@
+---
+services:
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "9000:3000"
+    volumes:
+      - ./config/grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/provisioning-dashboards.yaml:ro
+      - ./config/grafana-datasources.yaml:/etc/grafana/provisioning/datasources/provisioning-datasources.yaml:ro
+      - ./config/mimir-alertmanager.json:/var/lib/grafana/dashboards/mimir-alertmanager.json:ro
+      - ./config/mimir-compactor.json:/var/lib/grafana/dashboards/mimir-compactor.json:ro
+      - ./config/mimir-object-store.json:/var/lib/grafana/dashboards/mimir-object-store.json:ro
+      - ./config/mimir-overrides.json:/var/lib/grafana/dashboards/mimir-overrides.json:ro
+      - ./config/mimir-queries.json:/var/lib/grafana/dashboards/mimir-queries.json:ro
+      - ./config/mimir-reads.json:/var/lib/grafana/dashboards/mimir-reads.json:ro
+      - ./config/mimir-ruler.json:/var/lib/grafana/dashboards/mimir-ruler.json:ro
+      - ./config/mimir-tenants.json:/var/lib/grafana/dashboards/mimir-tenants.json:ro
+      - ./config/mimir-top-tenants.json:/var/lib/grafana/dashboards/mimir-top-tenants.json:ro
+      - ./config/mimir-writes.json:/var/lib/grafana/dashboards/mimir-writes.json:ro
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=critical
+
+  minio:
+    image: quay.io/minio/minio:latest
+    entrypoint: [""]
+    command: ["sh", "-c", "mkdir -p /data/mimir && minio server --quiet /data"]
+    environment:
+      - MINIO_ROOT_USER=mimir
+      - MINIO_ROOT_PASSWORD=supersecret
+    volumes:
+      - minio-data:/data
+  mimir:
+    image: grafana/mimir:latest
+
+  load-balancer:
+    image: nginx:latest
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - "mimir-1"
+      - "mimir-2"
+      - "mimir-3"
+    ports:
+      - 9009:9009
+
+  prometheus_server:
+    image: prom/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --log.level=error
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    volumes:
+      - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus-rules.yaml:/etc/prometheus/rules.yaml
+    depends_on:
+      - "mimir-1"
+      - "mimir-2"
+      - "mimir-3"
+
+  mimir-1:
+    image: grafana/mimir:latest
+    command: ["-config.file=/etc/mimir.yaml"]
+    hostname: mimir-1
+    depends_on:
+      - minio
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir.yaml
+      - ./config/mimir-alertmanager-fallback-config.yaml:/etc/alertmanager-fallback-config.yaml
+      - mimir-1-data:/data
+
+  mimir-2:
+    image: grafana/mimir:latest
+    command: ["-config.file=/etc/mimir.yaml"]
+    hostname: mimir-2
+    depends_on:
+      - minio
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir.yaml
+      - ./config/mimir-alertmanager-fallback-config.yaml:/etc/alertmanager-fallback-config.yaml
+      - mimir-2-data:/data
+
+  mimir-3:
+    image: grafana/mimir:latest
+    command: ["-config.file=/etc/mimir.yaml"]
+    hostname: mimir-3
+    depends_on:
+      - minio
+    volumes:
+      - ./config/mimir.yaml:/etc/mimir.yaml
+      - ./config/mimir-alertmanager-fallback-config.yaml:/etc/alertmanager-fallback-config.yaml
+      - mimir-3-data:/data
+
+volumes:
+  mimir-1-data:
+  mimir-2-data:
+  mimir-3-data:
+  minio-data:
